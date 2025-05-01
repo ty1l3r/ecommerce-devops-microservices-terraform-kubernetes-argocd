@@ -1,0 +1,149 @@
+# Microservice Customers
+
+## Vue d'ensemble
+
+Ce microservice est responsable de la gestion des utilisateurs dans la plateforme e-commerce. Il gère l'authentification, les profils clients, les adresses de livraison, les listes de souhaits et les interactions avec le panier d'achat. Le service maintient sa propre base de données MongoDB et communique avec les autres services via RabbitMQ.
+
+## Fonctionnalités principales
+
+- Authentification utilisateur (inscription, connexion)
+- Gestion de profil client avec informations personnelles
+- Gestion des adresses de livraison
+- Gestion de la liste de souhaits (ajout/suppression)
+- Gestion du panier d'achat (ajout/modification/suppression)
+- Suivi des commandes et historique d'achat
+- Communication événementielle avec d'autres microservices
+
+## Architecture technique
+
+### Structure du code
+
+```
+src/
+├── api/
+│   ├── customer.js       # API endpoints pour les clients
+│   └── app-events.js     # Gestion des événements
+├── config/
+│   └── index.js          # Configuration de l'application
+├── database/
+│   ├── models/           # Modèles MongoDB (Customer, Address)
+│   └── repository/       # Accès aux données
+├── services/
+│   └── customer-service.js  # Logique métier
+└── utils/
+    └── index.js          # Utilitaires (auth, encryption, messaging)
+```
+
+### Technologies utilisées
+
+- **Runtime**: Node.js 16
+- **Framework**: Express.js
+- **Base de données**: MongoDB
+- **Authentication**: JWT (JSON Web Tokens) avec Bcrypt
+- **Messaging**: RabbitMQ
+- **Containerisation**: Docker
+
+## Flux d'authentification
+
+1. L'utilisateur s'inscrit avec email/mot de passe
+2. Le mot de passe est hashé avec bcrypt avant stockage
+3. Un JWT est généré et retourné au client
+4. Pour l'authentification, le token est vérifié à chaque requête
+
+## Communication via RabbitMQ
+
+Le microservice Customers utilise RabbitMQ pour:
+
+1. Écouter les événements des autres services comme:
+   - Ajout/Suppression de produits dans la liste de souhaits
+   - Ajout/Suppression de produits dans le panier
+   - Création de commandes
+
+L'URL de connexion est construite dynamiquement à partir des variables d'environnement:
+```
+amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_SERVICE}
+```
+
+## API Endpoints
+
+| Méthode | Endpoint | Description | Authentification |
+|---------|----------|-------------|-----------------|
+| POST | /customer/signup | Inscription utilisateur | Non requise |
+| POST | /customer/login | Connexion utilisateur | Non requise |
+| GET | /customer/profile | Obtenir le profil utilisateur | Requise |
+| POST | /customer/address | Ajouter une adresse | Requise |
+| GET | /customer/wishlist | Obtenir la liste de souhaits | Requise |
+| GET | /customer/shoping-details | Obtenir les détails du panier et commandes | Requise |
+| GET | /customer/whoami | Vérification identité | Requise |
+| GET | /health | Vérification état du service | Non requise |
+
+## Modèle de données
+
+### Customer
+```javascript
+{
+  email: String,
+  password: String,
+  salt: String,
+  phone: String,
+  address: [{ type: ObjectId, ref: 'address' }],
+  cart: [{ product: {}, unit: Number }],
+  wishlist: [{ 
+    _id: String,
+    name: String, 
+    desc: String,
+    price: Number,
+    available: Boolean,
+    banner: String 
+  }],
+  orders: [Object]
+}
+```
+
+## Configuration par variables d'environnement
+
+| Variable | Description | Obligatoire |
+|----------|-------------|------------|
+| PORT | Port d'écoute (défaut: 8001) | Non |
+| MONGODB_URI | URL de connexion MongoDB | Oui |
+| APP_SECRET | Clé secrète pour JWT | Oui |
+| RABBITMQ_USER | Nom d'utilisateur RabbitMQ | Oui |
+| RABBITMQ_PASSWORD | Mot de passe RabbitMQ | Oui |
+| RABBITMQ_SERVICE | Nom d'hôte RabbitMQ | Oui |
+| EXCHANGE_NAME | Nom de l'échange RabbitMQ | Oui |
+| CUSTOMER_SERVICE | Nom du service client (défaut: customer_service) | Non |
+| SHOPPING_SERVICE | Nom du service shopping (défaut: shopping_service) | Non |
+
+## Exécution locale
+
+```bash
+# Installation des dépendances
+npm install
+
+# Démarrage du service
+npm start
+
+# Mode développement avec rechargement automatique
+npm run dev
+
+# Tests
+npm test
+```
+
+## Conteneurisation
+
+Le service est conteneurisé avec Docker, utilisant Node.js 16 comme image de base.
+
+```dockerfile
+FROM node:16
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 8001
+CMD ["npm", "start"]
+```
+
+## Intégration dans la pipeline CI/CD
+
+Ce microservice fait partie intégrante de la plateforme e-commerce GitOps et est déployé automatiquement sur Kubernetes via ArgoCD lors des mises à jour.

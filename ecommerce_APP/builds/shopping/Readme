@@ -1,0 +1,103 @@
+# Microservice Shopping
+
+## Vue d'ensemble
+
+Ce microservice fait partie de l'architecture e-commerce et gère toutes les fonctionnalités liées au panier d'achat et aux commandes. Il interagit avec les autres services via RabbitMQ pour maintenir la cohérence des données dans l'ensemble du système.
+
+## Fonctionnalités principales
+
+- Gestion complète du panier d'achat (ajout, suppression, modification des quantités)
+- Traitement des commandes (création, historique, détails)
+- Communication asynchrone avec les autres microservices via RabbitMQ
+- API RESTful sécurisée avec JWT pour l'authentification
+
+## Architecture technique
+
+### Structure du code
+
+```
+src/
+├── api/                 # Définitions des routes et endpoints API
+├── config/              # Configuration de l'application 
+├── database/
+│   ├── models/          # Modèles MongoDB (Cart, Order)
+│   └── repository/      # Logique d'accès aux données
+├── services/            # Logique métier
+└── utils/               # Fonctions utilitaires (auth, messaging)
+```
+
+### Technologies utilisées
+
+- **Runtime**: Node.js 16
+- **Framework**: Express.js
+- **Base de données**: MongoDB
+- **Messaging**: RabbitMQ (pour la communication entre services)
+- **Authentification**: JWT (JSON Web Tokens)
+- **Conteneurisation**: Docker
+
+## Intégration avec RabbitMQ
+
+Le service Shopping utilise RabbitMQ pour:
+1. Publier des événements lorsqu'une commande est créée
+2. S'abonner aux événements provenant d'autres services (ex: ajout au panier, suppression du panier)
+
+L'URL de connexion RabbitMQ est construite dynamiquement à partir des variables d'environnement:
+```
+amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_SERVICE}
+```
+
+## API Endpoints
+
+| Méthode | Endpoint | Description | Authentification |
+|---------|----------|-------------|-----------------|
+| GET | /shopping/cart | Récupérer le panier de l'utilisateur | Requise |
+| PUT | /shopping/cart | Ajouter un produit au panier | Requise |
+| DELETE | /shopping/cart/:id | Supprimer un produit du panier | Requise |
+| POST | /shopping/order | Passer une commande | Requise |
+| GET | /shopping/orders | Obtenir l'historique des commandes | Requise |
+| GET | /health | Vérifier l'état du service | Non requise |
+
+## Configuration par variables d'environnement
+
+| Variable | Description | Obligatoire |
+|----------|-------------|------------|
+| PORT | Port d'écoute du service (défaut: 8003) | Non |
+| MONGODB_URI | URL de connexion MongoDB | Oui |
+| APP_SECRET | Clé secrète pour JWT | Oui |
+| RABBITMQ_USER | Nom d'utilisateur RabbitMQ | Oui |
+| RABBITMQ_PASSWORD | Mot de passe RabbitMQ | Oui |
+| RABBITMQ_SERVICE | Nom d'hôte RabbitMQ | Oui |
+| EXCHANGE_NAME | Nom de l'échange RabbitMQ | Oui |
+| CUSTOMER_SERVICE | Nom du service client (défaut: customer_service) | Non |
+| SHOPPING_SERVICE | Nom du service shopping (défaut: shopping_service) | Non |
+
+## Conteneurisation
+
+Le service est conteneurisé avec Docker, utilisant Node.js 16 comme image de base.
+
+```dockerfile
+FROM node:16
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+EXPOSE 8003
+CMD ["npm", "start"]
+```
+
+## Exécution locale
+
+```bash
+# Installation des dépendances
+npm install
+
+# Démarrage du service
+npm start
+
+# Exécution des tests
+npm test
+```
+
+## Intégration dans la pipeline CI/CD
+
+Ce service est automatiquement déployé dans l'infrastructure Kubernetes via ArgoCD dans le cadre de la plateforme GitOps E-commerce.

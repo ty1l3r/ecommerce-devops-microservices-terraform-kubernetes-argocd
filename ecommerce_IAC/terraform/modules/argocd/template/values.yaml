@@ -1,0 +1,96 @@
+server:
+  config:
+    server.cors.enabled: "true"
+    server.cors.allowOrigins: "*"
+  command:
+    - argocd-server
+  extraArgs:
+    - --insecure
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+      nginx.ingress.kubernetes.io/enable-cors: "true"
+    hosts:
+      - argocd.${domain_name}
+    paths:
+      - /
+    pathType: Prefix
+    tls: []
+
+configs:
+  repositories: {}
+  cm:
+    url: "http://argocd.${domain_name}"
+    server.insecure: "true"
+    admin.enabled: "true"
+    exec.enabled: "true"
+    server.disable.auth: "false"
+    application.syncPolicy: |
+      {
+        "automated": {
+          "prune": true,
+          "selfHeal": true
+        }
+      }
+  # Configuration RBAC avancée pour ArgoCD
+  rbac:
+    # Politique par défaut (role:readonly pour tous les utilisateurs non mappés)
+    policy.default: role:readonly
+    
+    # Définition des règles de contrôle d'accès basées sur les rôles (RBAC)
+    policy.csv: |
+      # Format de règle: p, [subject], [resource], [action], [object], [effect]
+      
+      # Rôle Administrateur (accès complet au système)
+      p, role:admin, *, *, *, allow
+      
+      # Rôle Développeur (peut synchroniser, mais pas supprimer d'applications)
+      p, role:developer, applications, get, */*, allow
+      p, role:developer, applications, create, */*, allow
+      p, role:developer, applications, update, */*, allow
+      p, role:developer, applications, sync, */*, allow
+      
+      # Rôle Lecture seule (juste voir, sans actions possibles)
+      p, role:readonly, applications, get, */*, allow
+      p, role:readonly, clusters, get, */*, allow
+      p, role:readonly, repositories, get, */*, allow
+      p, role:readonly, projects, get, */*, allow
+      
+      # Rôle DevOps (tout sauf la suppression des applications critiques)
+      p, role:devops, *, *, */*, allow
+      p, role:devops, applications, delete, */prod/*, deny
+      
+      # Restriction par projet - Les développeurs ne peuvent voir que leurs projets
+      p, role:frontend-dev, applications, *, */frontend/*, allow
+      p, role:backend-dev, applications, *, */backend/*, allow
+      
+      # Assignation des utilisateurs et groupes aux rôles
+      g, admin@example.com, role:admin
+      g, devops-team, role:devops
+      g, dev-frontend, role:frontend-dev
+      g, dev-backend, role:backend-dev
+      
+      # Assignation du rôle lecteur pour les utilisateurs authentifiés
+      g, *, role:readonly
+
+repoServer:
+  serviceAccount:
+    create: true
+    name: argocd-repo-server
+
+redis:
+  enabled: true
+  serviceAccount:
+    create: true
+    name: argocd-redis
+
+controller:
+  serviceAccount:
+    create: true
+    name: argocd-application-controller

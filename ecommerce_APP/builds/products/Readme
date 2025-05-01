@@ -1,0 +1,138 @@
+# Microservice Products
+
+## Vue d'ensemble
+
+Ce microservice fait partie de l'architecture e-commerce et gère toutes les fonctionnalités liées aux produits disponibles dans la plateforme. Il maintient son propre stockage de données MongoDB et communique avec les autres services via RabbitMQ.
+
+## Fonctionnalités principales
+
+- Gestion du catalogue de produits (création, listing, détails)
+- Filtrage des produits par catégorie (fruits, légumes, huiles)
+- Publication d'événements produits vers d'autres services
+- API RESTful avec authentification JWT
+- Gestion des listes de souhaits et du panier via événements
+
+## Architecture technique
+
+### Structure du code
+
+```
+src/
+├── api/                 # Définitions des routes API
+│   ├── middlewares/     # Middlewares (auth, validation)
+│   └── app-events.js    # Gestion des événements
+├── config/              # Configuration de l'application
+├── database/
+│   ├── models/          # Modèles MongoDB (Product)
+│   └── repository/      # Logique d'accès aux données
+├── services/            # Logique métier
+└── utils/               # Fonctions utilitaires (messaging, formatters)
+```
+
+### Technologies utilisées
+
+- **Runtime**: Node.js 16
+- **Framework**: Express.js
+- **Base de données**: MongoDB
+- **Messaging**: RabbitMQ (pour la communication entre services)
+- **Authentification**: JWT (JSON Web Tokens)
+- **Conteneurisation**: Docker
+
+## Schéma des données
+
+Chaque produit suit le modèle suivant:
+```javascript
+{
+  "name": String,       // Nom du produit
+  "desc": String,       // Description du produit
+  "type": String,       // Catégorie (fruits, vegetables, oils)
+  "banner": String,     // URL de l'image
+  "unit": Number,       // Quantité unitaire
+  "price": Number,      // Prix en centimes
+  "available": Boolean, // Disponibilité
+  "suplier": String     // Fournisseur
+}
+```
+
+## Intégration avec RabbitMQ
+
+Le service Products utilise RabbitMQ pour:
+1. Publier des événements lorsqu'un produit est ajouté/retiré du panier
+2. Publier des événements lorsqu'un produit est ajouté/retiré de la liste de souhaits
+3. S'abonner aux événements d'autres services si nécessaire
+
+L'URL de connexion RabbitMQ est construite dynamiquement:
+```javascript
+amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_SERVICE}
+```
+
+## API Endpoints
+
+| Méthode | Endpoint | Description | Authentification |
+|---------|----------|-------------|-----------------|
+| GET | /product | Obtenir tous les produits | Non requise |
+| GET | /product/:id | Obtenir les détails d'un produit | Non requise |
+| GET | /product/category/:type | Filtrer par catégorie | Non requise |
+| POST | /product/create | Créer un nouveau produit | Non requise |
+| POST | /product/ids | Obtenir produits par IDs | Non requise |
+| PUT | /product/wishlist | Ajouter à la liste de souhaits | Requise |
+| DELETE | /product/wishlist/:id | Retirer de la liste de souhaits | Requise |
+| PUT | /product/cart | Ajouter au panier | Requise |
+| DELETE | /product/cart/:id | Retirer du panier | Requise |
+| GET | /product/whoami | Vérification service | Non requise |
+
+## Configuration par variables d'environnement
+
+| Variable | Description | Obligatoire |
+|----------|-------------|------------|
+| PORT | Port d'écoute du service (défaut: 8002) | Non |
+| MONGODB_URI | URL de connexion MongoDB | Oui |
+| APP_SECRET | Clé secrète pour JWT | Oui |
+| RABBITMQ_USER | Nom d'utilisateur RabbitMQ | Oui |
+| RABBITMQ_PASSWORD | Mot de passe RabbitMQ | Oui |
+| RABBITMQ_SERVICE | Nom d'hôte RabbitMQ | Oui |
+| EXCHANGE_NAME | Nom de l'échange RabbitMQ | Oui |
+| CUSTOMER_SERVICE | Nom du service client | Oui |
+| SHOPPING_SERVICE | Nom du service shopping | Oui |
+
+## Tests
+
+Le service inclut des tests unitaires pour valider le comportement des composants clés:
+```bash
+npm test
+```
+
+Les tests couvrent notamment:
+- Validation des entrées utilisateur pour la création de produits
+- Validation des réponses API
+
+## Conteneurisation
+
+Le service est conteneurisé avec Docker, utilisant Node.js 16 comme image de base.
+
+```dockerfile
+FROM node:16
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+EXPOSE 8002
+CMD ["npm", "start"]
+```
+
+## Exécution locale
+
+```bash
+# Installation des dépendances
+npm install
+
+# Démarrage du service
+npm start
+
+# Mode développement avec rechargement automatique
+npm run dev
+```
+
+## Intégration dans la pipeline CI/CD
+
+Ce service est automatiquement déployé dans l'infrastructure Kubernetes via ArgoCD dans le cadre de la plateforme GitOps E-commerce.

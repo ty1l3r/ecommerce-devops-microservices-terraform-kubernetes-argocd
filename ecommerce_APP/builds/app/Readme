@@ -1,0 +1,150 @@
+# Microservice Frontend App
+
+## Vue d'ensemble
+
+Ce service frontend React constitue l'interface utilisateur principale de la plateforme e-commerce. Il communique avec les autres microservices (Products, Customers, Shopping) via des API RESTful pour fournir une expérience utilisateur complète et réactive.
+
+## Notes importantes
+
+L'équipe Dev va devoir mettre a jour et actualiser l'application avec des versions sécurisé. 
+
+## Fonctionnalités principales
+
+- Authentification utilisateur (login/signup)
+- Navigation et recherche dans le catalogue de produits
+- Gestion du panier et des listes de souhaits
+- Système de commande avec suivi
+- État global géré avec Redux
+
+## Architecture technique
+
+### Structure du code
+
+```
+src/
+├── components/           # Composants React réutilisables
+│   ├── Address-comp.js   # Gestion des adresses
+│   ├── Cart-comp.js      # Composant panier
+│   ├── Header.js         # En-tête de l'application
+│   ├── Order-comp.js     # Affichage des commandes
+│   ├── ProductCard.js    # Carte produit
+│   └── Wishlist-comp.js  # Composant liste de souhaits
+├── pages/                # Composants de page
+│   ├── Home.js           # Page d'accueil
+│   ├── Login.js          # Authentification
+│   ├── ProductDetail.js  # Détails d'un produit
+│   └── Profile.js        # Profil utilisateur
+├── store/                # État Redux
+│   ├── actions/          # Actions Redux
+│   └── reducers/         # Reducers Redux
+├── utils/                # Utilitaires pour les appels API
+├── App.js                # Composant racine avec routage
+└── index.js              # Point d'entrée de l'application
+```
+
+### Technologies utilisées
+
+- **Framework frontend**: React 17
+- **Gestion d'état**: Redux avec Redux Thunk
+- **Routage**: React Router DOM v5
+- **Styling**: Bootstrap 5 et CSS personnalisé
+- **Requêtes HTTP**: Axios
+- **Formatage de date**: Moment.js
+- **Serveur de production**: Nginx
+- **Conteneurisation**: Docker
+
+## Flux de données avec Redux
+
+L'application utilise Redux pour la gestion d'état global avec les principaux slices suivants:
+
+### UserReducer
+Gère l'authentification, le profil utilisateur, la liste de souhaits, le panier et les commandes:
+```javascript
+const initialState = {
+    user: {},      // Informations d'authentification: {id, token}
+    profile: {},   // Profil utilisateur complet
+    wishlist: [],  // Liste des produits souhaités
+    cart: [],      // Panier d'achat
+    orders: []     // Historique des commandes
+}
+```
+
+### ShoppingReducer
+Gère les produits et les catégories:
+```javascript
+const initialState = {
+    categories: [], // Catégories de produits
+    products: [],   // Liste des produits
+    currentProduct: {} // Détails du produit actuellement consulté
+}
+```
+
+## Appels API
+
+Les services backend sont consommés via des fonctions utilitaires HTTP:
+- `GetData`: Requêtes GET
+- `PostData`: Requêtes POST
+- `PutData`: Requêtes PUT
+- `DeleteData`: Requêtes DELETE
+
+Ces fonctions ajoutent automatiquement les tokens d'authentification depuis localStorage.
+
+## Routage
+
+L'application utilise React Router DOM pour naviguer entre les principales vues:
+- `/`: Page d'accueil avec liste de produits
+- `/login`: Authentification utilisateur
+- `/details/:id`: Détails d'un produit spécifique
+- Le profil utilisateur est accessible après connexion
+
+## Configuration Nginx
+
+Le fichier `nginx.conf` configure le serveur web pour:
+- Servir correctement l'application SPA React
+- Router toutes les requêtes vers index.html
+- Optimiser la mise en cache des ressources statiques
+
+## Conteneurisation
+
+L'application est conteneurisée avec Docker pour garantir une exécution cohérente dans tous les environnements:
+
+```dockerfile
+FROM node:16 as build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=build /app/build /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+## Configuration du proxy
+
+En développement, l'application est configurée pour rediriger les requêtes API vers les microservices appropriés:
+- `/customer/*` → service customers
+- `/product/*` → service products  
+- `/shopping/*` → service shopping
+
+En production, cette redirection est gérée par l'Ingress Kubernetes.
+
+## Exécution locale
+
+```bash
+# Installation des dépendances
+npm install
+
+# Démarrage du serveur de développement
+npm start
+
+# Construction pour production
+npm run build
+```
+
+## Intégration dans la pipeline CI/CD
+
+Ce service frontend est automatiquement déployé sur Kubernetes via ArgoCD en tant que partie de la plateforme GitOps E-commerce.

@@ -1,0 +1,191 @@
+#-----------------------------------------------------------------
+# PIPELINE CI/CD POUR L'INFRASTRUCTURE AS CODE
+# Auteur: Fabien & Dina
+# Dernière mise à jour: Mars 2025
+# TODO : 
+# - Implémenter des tests de sécurité pour l'infrastructure avec tfsec
+# - Ajouter la validation des plans Terraform via merge requests ? 
+# - Explorer les tests d'infrastructure avec Terratest pour valider les déploiements
+# - Évaluer la migration de sealed-secrets vers HashiCorp Vault pour une meilleure gestion des secrets (rotation, audit)
+# - Ajouter des sauvegardes régulières de l'état Terraform (voir le besoin de sauvegarde)
+#-----------------------------------------------------------------
+
+#-----------------------------------------------------------------
+# VARIABLES GLOBALES
+# Définition des variables d'environnement utilisées dans le pipeline
+#-----------------------------------------------------------------
+variables:
+  BASE_IMAGE: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  TF_LOG: "ERROR"
+  TF_LOG_PATH: "terraform.log"
+  TF_IN_AUTOMATION: "true"
+  TF_STATE_BUCKET: "my-project-tfstate"
+  DYNAMODB_TABLE: "my-project-tfstate-lock"
+  TF_VAR_app_repository_secret: $(cat $ARGOCD_SSH_KEY_MANIFEST)
+  TF_VAR_argocd_admin_password: ${ARGOCD_ADMIN_PASSWORD}
+  TF_VAR_gitlab_ssh_key: ${ARGOCD_SSH_KEY_MANIFEST}
+
+#-----------------------------------------------------------------
+# HOOKS - TEMPLATES RÉUTILISABLES
+# Ces templates définissent des comportements communs
+# pour différents types de jobs
+#-----------------------------------------------------------------
+
+# Template commun pour les jobs AWS
+# Configure l'environnement avec Terraform et AWS CLI
+.aws_common: &aws_common
+  image: ${BASE_IMAGE}
+  before_script:
+    - |
+      echo "Vérification connexion AWS..."
+      aws sts get-caller-identity
+      apt-get update && apt-get install -y gnupg software-properties-common curl jq
+      curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+      echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
+      apt-get update && apt-get install -y terraform
+
+#-----------------------------------------------------------------
+# STAGES
+# Définition des étapes du pipeline CI/CD par ordre d'exécution
+#-----------------------------------------------------------------
+stages:
+  - infrastructure-vm  # Configuration de l'environnement VM local
+  - setup-aws          # Mise en place de l'infrastructure AWS
+  - cleanup-aws        # Nettoyage des ressources AWS
+  - cleanup-backend    # Nettoyage du backend Terraform
+
+#-----------------------------------------------------------------
+# INFRASTRUCTURE VM
+# Configuration de l'environnement Kubernetes local sur VM
+#-----------------------------------------------------------------
+
+# Installation et configuration de l'environnement K3s local
+vm_setup:
+  stage: infrastructure-vm
+  tags: [shell]
+  when: manual
+  allow_failure: true
+  before_script:
+    # Attribution des permissions d'exécution aux scripts
+    - chmod +x scripts/*.sh
+  script:
+    # Installation des composants Kubernetes nécessaires
+    - bash scripts/helm-install.sh
+    - bash scripts/metallb.sh
+    - bash scripts/nginx-ingress-vm.sh
+    - bash scripts/cert-manager.sh
+    - bash scripts/sealed-secret-install.sh
+
+#-----------------------------------------------------------------
+# SETUP AWS
+# Déploiement de l'infrastructure cloud sur AWS
+#-----------------------------------------------------------------
+
+# Création du backend Terraform (bucket S3 et table DynamoDB)
+1-setup_backend:
+  <<: *aws_common
+  stage: setup-aws
+  tags: [docker]
+  when: manual
+  script:
+    - |
+      cd terraform/backend
+      terraform init
+      terraform plan
+      terraform apply -auto-approve
+  rules:
+    # Exécution manuelle uniquement sur la branche main
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - when: never
+
+# Déploiement de l'infrastructure principale AWS
+2-setup_aws:
+  <<: *aws_common
+  stage: setup-aws
+  tags: [prod]
+  when: manual
+  variables:
+    TERRAFORM_DIR: terraform
+  script:
+    - |
+      cd terraform
+      export TF_VAR_app_repository_secret=$(cat "$ARGOCD_SSH_KEY_MANIFEST")
+      # Initialisation de Terraform
+      terraform init \
+        -backend-config="bucket=${TF_STATE_BUCKET}" \
+        -backend-config="key=infrastructure/terraform.tfstate" \
+        -backend-config="region=eu-west-3" \
+        -backend-config="dynamodb_table=${DYNAMODB_TABLE}"
+
+      # Sélection ou création du workspace production
+      terraform workspace select production || terraform workspace new production
+
+      # Plan et Apply avec workspace production
+      terraform plan -var-file="terraform.tfvars"
+      terraform apply -auto-approve -var-file="terraform.tfvars"
+      # Export des outputs vers S3
+      echo "Export des outputs vers S3..."
+      terraform output -json > terraform_outputs.json
+      aws s3 cp terraform_outputs.json s3://${TF_STATE_BUCKET}/env:production/infrastructure/outputs.json
+  rules:
+    # Exécution manuelle sur les branches feature et main
+    - if: $CI_COMMIT_BRANCH == "feature"
+      when: manual
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - when: never
+
+#-----------------------------------------------------------------
+# CLEANUP
+# Jobs pour supprimer l'infrastructure AWS et nettoyer les ressources
+#-----------------------------------------------------------------
+
+# Destruction de l'infrastructure AWS
+destroy:
+  <<: *aws_common
+  stage: cleanup-aws
+  tags:
+    - prod
+  when: manual
+  allow_failure: false
+  variables:
+    TERRAFORM_DIR: terraform
+  rules:
+    - when: manual
+  script:
+    # Destruction des ressources Kubernetes : A UTILISER AVEC PRUDENCE)
+    #- chmod +x scripts/destroy.sh
+    #- ./scripts/destroy.sh
+
+    # Destruction Terraform
+    - |
+      cd terraform
+      terraform init \
+        -backend-config="bucket=${TF_STATE_BUCKET}" \
+        -backend-config="key=infrastructure/terraform.tfstate" \
+        -backend-config="region=eu-west-3" \
+        -backend-config="dynamodb_table=${DYNAMODB_TABLE}"
+      terraform workspace select production
+      export TF_COMMAND_TIMEOUT=1800
+      terraform destroy -auto-approve -var-file="terraform.tfvars"
+
+# Suppression du backend Terraform (bucket S3 et table DynamoDB)
+# ATTENTION : S'exécute automatiquement si destroy réussit ( pour les besoins du dev et de l'exercice)
+destroy_backend:
+  <<: *aws_common
+  stage: cleanup-backend
+  tags:
+    - prod
+  allow_failure: true
+  needs:
+    - job: destroy
+      artifacts: false
+  rules:
+    - if: '$CI_JOB_STATUS_destroy == "success"'  
+    - when: never
+  script:
+    - |
+      echo "Suppression forcée du bucket et de la table..."
+      aws s3 rb "s3://${TF_STATE_BUCKET}" --force
+      aws dynamodb delete-table --table-name "${DYNAMODB_TABLE}" --region eu-west-3 || true
